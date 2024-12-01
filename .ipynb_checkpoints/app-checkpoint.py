@@ -1,87 +1,68 @@
-# Streamlit interface for model interaction
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-import joblib
 import streamlit as st
+import pandas as pd
+import requests
+import matplotlib.pyplot as plt
 
-# Title for the Streamlit interface
-st.title("Credit Card Fraud Detection System")
+# App Title
+st.title("Dynamic Fraud Detection System")
 
-# Sidebar for uploading a CSV dataset
-st.sidebar.title("Upload Dataset")
-uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
+# Upload Section
+st.sidebar.header("Upload Dataset")
+uploaded_file = st.sidebar.file_uploader("Upload your CSV file", type=["csv"])
 
-if uploaded_file is not None:
-    # Load the dataset
+if uploaded_file:
+    # Display the uploaded data
     data = pd.read_csv(uploaded_file)
-    st.write("Dataset Preview")
+    st.subheader("Uploaded Dataset")
     st.write(data.head())
+    
+    # Fraud data visualization
+    if 'Class' in data.columns:
+        st.subheader("Fraud vs. Non-Fraud Distribution")
+        fraud_count = data['Class'].value_counts()
+        labels = ['Non-Fraud', 'Fraud']
+        fig, ax = plt.subplots()
+        ax.pie(fraud_count, labels=labels, autopct='%1.1f%%', startangle=90, colors=['skyblue', 'red'])
+        ax.axis('equal')
+        st.pyplot(fig)
 
-    # Preprocessing the data
-    X = data.drop('Class', axis=1)  # Features
-    y = data['Class']  # Target
+# Input Transaction Details for Single Prediction
+st.sidebar.header("Input Transaction Details")
+input_form = st.sidebar.form("transaction_form")
+features = {}
 
-    # Scaling 'Amount' and 'Time' features
-    scaler = StandardScaler()
-    X['Amount'] = scaler.fit_transform(X['Amount'].values.reshape(-1, 1))
-    X['Time'] = scaler.fit_transform(X['Time'].values.reshape(-1, 1))
+if uploaded_file:
+    for col in data.columns[:-1]:  # Exclude the target column
+        features[col] = input_form.number_input(f"Enter {col}", value=0.0)
 
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+    submitted = input_form.form_submit_button("Submit Transaction")
+    if submitted:
+        st.write("Transaction Details Submitted for Prediction:")
+        st.write(features)
 
-    # Sidebar options for training the model
-    if st.sidebar.button('Train Model'):
-        # Train RandomForestClassifier
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(X_train, y_train)
+# Predict Button
+if uploaded_file and st.sidebar.button("Predict Fraud for Dataset"):
+    # Call the backend API for prediction
+    response = requests.post(
+        "http://127.0.0.1:8000/predict",
+        files={"file": uploaded_file}
+    )
+    if response.status_code == 200:
+        predictions = response.json()["predictions"]
+        st.subheader("Predictions for Uploaded Dataset")
+        data["Predicted Fraud"] = predictions
+        st.write(data.head())
 
-        # Save the model for future use
-        joblib.dump(model, 'fraud_detection_model.pkl')
-        st.write("Model trained and saved successfully!")
+        # Display fraud predictions
+        st.subheader("Predicted Fraud Distribution")
+        pred_fraud_count = pd.Series(predictions).value_counts()
+        labels = ['Non-Fraud', 'Fraud']
+        fig, ax = plt.subplots()
+        ax.pie(pred_fraud_count, labels=labels, autopct='%1.1f%%', startangle=90, colors=['lightgreen', 'orange'])
+        ax.axis('equal')
+        st.pyplot(fig)
+    else:
+        st.error("Error in API call. Check the backend server.")
 
-        # Predictions and evaluation
-        y_pred = model.predict(X_test)
-        st.write("Confusion Matrix:")
-        st.write(confusion_matrix(y_test, y_pred))
-
-        st.write("Classification Report:")
-        st.write(classification_report(y_test, y_pred))
-
-        st.write("Accuracy Score:")
-        st.write(accuracy_score(y_test, y_pred))
-
-    # Load pre-trained model
-    if st.sidebar.button('Load Model'):
-        model = joblib.load('fraud_detection_model.pkl')
-        st.write("Model loaded successfully!")
-
-        # Predict on the test data
-        y_pred = model.predict(X_test)
-        st.write("Predictions on test data:")
-        st.write(y_pred)
-
-    # Real-time fraud detection on new data
-    st.sidebar.title("Fraud Detection")
-    uploaded_test_file = st.sidebar.file_uploader("Upload transaction file for detection", type="csv")
-
-    if uploaded_test_file is not None:
-        test_data = pd.read_csv(uploaded_test_file)
-        st.write("Transaction Data Preview")
-        st.write(test_data.head())
-
-        # Scale the 'Amount' and 'Time' features
-        test_data['Amount'] = scaler.transform(test_data['Amount'].values.reshape(-1, 1))
-        test_data['Time'] = scaler.transform(test_data['Time'].values.reshape(-1, 1))
-
-        # Load the model and make predictions
-        model = joblib.load('fraud_detection_model.pkl')
-        predictions = model.predict(test_data)
-
-        # Show predictions
-        st.write("Fraud Detection Results:")
-        st.write(predictions)
-
+# App Footer
+st.sidebar.info("Developed by Sudhanshu Singh")
